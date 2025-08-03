@@ -36,8 +36,17 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Create uploads directory if it doesn't exist
 const uploadDir = process.env.UPLOAD_DIR || './uploads';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+// Only create directory if we're not in a serverless environment
+// Vercel serverless functions have read-only file system
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  try {
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+  } catch (error) {
+    console.warn('Could not create uploads directory:', error.message);
+    // Continue without creating directory - will handle in upload routes
+  }
 }
 
 // Routes

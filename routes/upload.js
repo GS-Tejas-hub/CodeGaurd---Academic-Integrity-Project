@@ -9,16 +9,25 @@ const fileProcessor = require('../utils/fileProcessor');
 const router = express.Router();
 
 // Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = process.env.UPLOAD_DIR || './uploads';
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
+const isServerless = process.env.NODE_ENV === 'production' && process.env.VERCEL;
+
+let storage;
+if (isServerless) {
+  // Use memory storage for serverless environments
+  storage = multer.memoryStorage();
+} else {
+  // Use disk storage for development
+  storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      const uploadDir = process.env.UPLOAD_DIR || './uploads';
+      cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+      cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+    }
+  });
+}
 
 const upload = multer({ 
   storage: storage,
@@ -49,7 +58,6 @@ router.post('/file', upload.single('codeFile'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const filePath = req.file.path;
     const fileName = req.file.originalname;
     const fileSize = req.file.size;
 
@@ -57,7 +65,15 @@ router.post('/file', upload.single('codeFile'), async (req, res) => {
     
     // Handle ZIP files
     if (path.extname(fileName).toLowerCase() === '.zip') {
-      const zip = new AdmZip(filePath);
+      let zip;
+      if (isServerless) {
+        // Use buffer for serverless environment
+        zip = new AdmZip(req.file.buffer);
+      } else {
+        // Use file path for development environment
+        zip = new AdmZip(req.file.path);
+      }
+      
       const zipEntries = zip.getEntries();
       
       for (const entry of zipEntries) {
@@ -80,7 +96,15 @@ router.post('/file', upload.single('codeFile'), async (req, res) => {
       }
     } else {
       // Single file
-      const content = fs.readFileSync(filePath, 'utf8');
+      let content;
+      if (isServerless) {
+        // Use buffer for serverless environment
+        content = req.file.buffer.toString('utf8');
+      } else {
+        // Use file path for development environment
+        content = fs.readFileSync(req.file.path, 'utf8');
+      }
+      
       extractedCode.push({
         filename: fileName,
         content: content,
@@ -88,8 +112,14 @@ router.post('/file', upload.single('codeFile'), async (req, res) => {
       });
     }
 
-    // Clean up uploaded file
-    fs.unlinkSync(filePath);
+    // Clean up uploaded file (only in development)
+    if (!isServerless && req.file.path) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (error) {
+        console.warn('Could not delete uploaded file:', error.message);
+      }
+    }
 
     res.json({
       success: true,
