@@ -18,16 +18,27 @@ router.post('/generate', async (req, res) => {
 
     const reportResult = await reportGenerator.generateReport(analysisData, options);
 
-    res.json({
-      success: true,
-      message: 'Report generated successfully',
-      data: {
-        reportId: reportResult.reportId,
-        filename: reportResult.filename,
-        size: reportResult.size,
-        downloadUrl: `/api/reports/download/${reportResult.filename}`
-      }
-    });
+    // Check if we're in serverless environment (buffer response)
+    if (reportResult.buffer) {
+      // Store buffer in memory or temporary storage for download
+      // For now, we'll send it directly
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${reportResult.filename}"`);
+      res.setHeader('Content-Length', reportResult.size);
+      res.send(reportResult.buffer);
+    } else {
+      // File system response (development)
+      res.json({
+        success: true,
+        message: 'Report generated successfully',
+        data: {
+          reportId: reportResult.reportId,
+          filename: reportResult.filename,
+          size: reportResult.size,
+          downloadUrl: `/api/reports/download/${reportResult.filename}`
+        }
+      });
+    }
 
   } catch (error) {
     console.error('Report generation error:', error);

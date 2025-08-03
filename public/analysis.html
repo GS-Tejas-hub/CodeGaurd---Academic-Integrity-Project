@@ -893,19 +893,36 @@
                     throw new Error('Report generation failed');
                 }
 
-                const result = await response.json();
+                // Check if response is PDF (serverless) or JSON (development)
+                const contentType = response.headers.get('content-type');
                 
-                // Download the report
-                const downloadResponse = await fetch(result.data.downloadUrl);
-                const blob = await downloadResponse.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = result.data.filename;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
+                if (contentType && contentType.includes('application/pdf')) {
+                    // Direct PDF response (serverless environment)
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `codeguard_report_${Date.now()}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                } else {
+                    // JSON response with download URL (development environment)
+                    const result = await response.json();
+                    
+                    // Download the report
+                    const downloadResponse = await fetch(result.data.downloadUrl);
+                    const blob = await downloadResponse.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = result.data.filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }
 
                 showSuccess('Report downloaded successfully!');
 

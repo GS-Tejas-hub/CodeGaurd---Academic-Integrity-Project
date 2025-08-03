@@ -6,9 +6,17 @@ class ReportGenerator {
   constructor() {
     this.reportDir = process.env.REPORT_DIR || './reports';
     
-    // Create reports directory if it doesn't exist
-    if (!fs.existsSync(this.reportDir)) {
-      fs.mkdirSync(this.reportDir, { recursive: true });
+    // Only create directory if we're not in a serverless environment
+    // Vercel serverless functions have read-only file system
+    if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+      try {
+        if (!fs.existsSync(this.reportDir)) {
+          fs.mkdirSync(this.reportDir, { recursive: true });
+        }
+      } catch (error) {
+        console.warn('Could not create reports directory:', error.message);
+        // Continue without creating directory - will handle in generateReport
+      }
     }
   }
 
@@ -23,15 +31,31 @@ class ReportGenerator {
 
       const reportId = generateReportId();
       const filename = `report_${reportId}.pdf`;
-      const filepath = path.join(this.reportDir, filename);
+      
+      // Check if we're in a serverless environment
+      const isServerless = process.env.NODE_ENV === 'production' && process.env.VERCEL;
+      
+      let filepath;
+      let stream;
+      
+      if (isServerless) {
+        // In serverless environment, use buffer instead of file system
+        filepath = null;
+        stream = null;
+      } else {
+        // In development, use file system
+        filepath = path.join(this.reportDir, filename);
+        stream = fs.createWriteStream(filepath);
+      }
 
       const doc = new PDFDocument({
         size: 'A4',
         margin: 50
       });
 
-      const stream = fs.createWriteStream(filepath);
-      doc.pipe(stream);
+      if (stream) {
+        doc.pipe(stream);
+      }
 
       // Generate report content
       this.generateHeader(doc, customTitle, analysisData);
@@ -51,18 +75,38 @@ class ReportGenerator {
 
       doc.end();
 
-      return new Promise((resolve, reject) => {
-        stream.on('finish', () => {
-          resolve({
-            filename,
-            filepath,
-            reportId,
-            size: fs.statSync(filepath).size
+      if (isServerless) {
+        // Return buffer for serverless environment
+        return new Promise((resolve, reject) => {
+          const chunks = [];
+          doc.on('data', chunk => chunks.push(chunk));
+          doc.on('end', () => {
+            const buffer = Buffer.concat(chunks);
+            resolve({
+              filename,
+              filepath: null,
+              reportId,
+              size: buffer.length,
+              buffer: buffer
+            });
           });
+          doc.on('error', reject);
         });
-        
-        stream.on('error', reject);
-      });
+      } else {
+        // Return file path for development environment
+        return new Promise((resolve, reject) => {
+          stream.on('finish', () => {
+            resolve({
+              filename,
+              filepath,
+              reportId,
+              size: fs.statSync(filepath).size
+            });
+          });
+          
+          stream.on('error', reject);
+        });
+      }
 
     } catch (error) {
       console.error('Report generation error:', error);
